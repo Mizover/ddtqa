@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<style>
+					body {
+						background-color: white; /* Ensure the iframe has a white background */
+					}
+				</style>
+				<script>
+					var Z_CDN_WHITELIST = [
+						'cdn.jsdelivr.net',
+						'cdnjs.cloudflare.com',
+						'cdn.tailwindcss.com',
+						'unpkg.com',
+						'fonts.googleapis.com',
+						'd3js.org',
+						'cdn.babylonjs.com',
+						'html2canvas.hertzen.com',
+						'code.jquery.com',
+						'cdn.datatables.net',
+						'kit.fontawesome.com',
+						'code.createjs.com',
+						'cdn.plot.ly',
+						'fonts.gstatic.com',
+						'www.rgraph.net',
+						'api.mapbox.com',
+						'polyfill.io',
+						'cdn.quilljs.com',
+						'picsum.photos',
+						'esm.sh'
+					];
+
+					function z_isUrlInWhitelist(url) {
+						if (!url || typeof url !== 'string') {
+							return false;
+						}
+						try {
+							const urlObj = new URL(url);
+							const hostname = urlObj.hostname;
+							return Z_CDN_WHITELIST.some(domain => hostname === domain);
+						} catch (e) {
+							return false;
+						}
+					}
+
+						function z_proxyCdnUrl(url) {
+						if (!url || !url.startsWith('http')) {
+							return url;
+						}
+							if (!z_isUrlInWhitelist(url)) {
+							return url;
+						}
+						if (!url.startsWith('https://artifacts-cdn.chatglm.site/')) {
+							return 'https://artifacts-cdn.chatglm.site/' + url;
+						}
+						return url;
+					}
+					
+					// 增强版外部链接拦截 - 适合放在模板字符串中
+					document.addEventListener('click', function (ev) {
+						try {
+							const anchor = ev.target?.closest?.('a[href]') || null;
+							if (!anchor) return;
+
+							let href = anchor.getAttribute('href')?.trim() || '';
+							if (!href) return;
+
+							if (href.startsWith('javascript:')) return;
+
+							// 新需求：href="#" 的链接完全阻止跳转和任何行为
+							if (href === '#') {
+								ev.preventDefault();
+								return;
+							}
+
+							// 处理其他内部锚点（如 #about、#contact 等）
+							if (href.startsWith('#')) {
+								const rawId = href.slice(1);
+								if (!rawId) return;
+
+								const id = decodeURIComponent(rawId);
+								const target = 
+									document.getElementById(id) ||
+									document.querySelector('a[name="' + id.replace(/"/g, '\"') + '"]') ||
+									document.querySelector('[name="' + id.replace(/"/g, '\"') + '"]');
+
+								if (target && target.scrollIntoView) {
+									ev.preventDefault();
+									try {
+										history.pushState(null, '', href);
+									} catch (e) {}
+									target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+								}
+								return;
+							}
+
+							// 处理外部链接
+							let url;
+							try {
+								url = new URL(href, window.location.href);
+							} catch (e) {
+								return;
+							}
+
+							if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
+							const isExternal = url.hostname !== window.location.hostname;
+
+							if (isExternal || anchor.getAttribute('target') === '_blank') {
+								ev.preventDefault();
+								window.open(url.toString(), '_blank', 'noopener,noreferrer');
+							}
+
+						} catch (e) {
+							// 出错时不阻止默认行为
+						}
+					}, true);
+
+					// 1. 暴力清除函数：从 DOM 层面抹除 onclick 属性
+					var Z_removeInlineOnclick = function () {
+						// 专门锁定 href="#" 且带有 onclick 的 a 标签
+						const targetedLinks = document.querySelectorAll('a[href="#"][onclick]');
+						for (let i = 0; i < targetedLinks.length; i++) {
+							targetedLinks[i].removeAttribute('onclick');
+							targetedLinks[i].onclick = null; // 确保 JS 层的赋值也被清理
+						}
+					};
+					// 3. 动态监测：防止页面通过异步加载重新生成带 onclick 的元素
+					var z_observer = new MutationObserver(function () {
+						Z_removeInlineOnclick();
+					});
+
+					z_observer.observe(document.documentElement, {
+						childList: true,
+						subtree: true,
+						attributes: true,
+						attributeFilter: ['onclick']
+					});
+
+					// 4. 初始化执行一次
+					Z_removeInlineOnclick();
+
+					const Z_rawCreateElement = document.createElement;
+
+					document.createElement = function (tagName, ...args) {
+						const el = Z_rawCreateElement.call(this, tagName, ...args);
+
+						if (tagName.toLowerCase() === 'script') {
+							const rawSetAttribute = el.setAttribute;
+							const rawGetAttribute = el.getAttribute;
+							let srcValue = '';
+							
+							el.setAttribute = function (name, value) {
+								if (name === 'src' && typeof value === 'string') {
+									value = z_proxyCdnUrl(value);
+									srcValue = value;
+								}
+								return rawSetAttribute.call(this, name, value);
+							};
+
+							Object.defineProperty(el, 'src', {
+								get: function() {
+									return srcValue || rawGetAttribute.call(this, 'src') || '';
+								},
+								set: function(value) {
+									if (typeof value === 'string') {
+										srcValue = z_proxyCdnUrl(value);
+										rawSetAttribute.call(this, 'src', srcValue);
+									} else {
+										srcValue = value;
+									}
+								},
+								configurable: true,
+								enumerable: true
+							});
+						}
+
+						if (tagName.toLowerCase() === 'link') {
+							const rawSetAttribute = el.setAttribute;
+							const rawGetAttribute = el.getAttribute;
+							let hrefValue = '';
+							
+							el.setAttribute = function (name, value) {
+								if (name === 'href' && typeof value === 'string') {
+									value = z_proxyCdnUrl(value);
+									hrefValue = value;
+								}
+								return rawSetAttribute.call(this, name, value);
+							};
+
+							Object.defineProperty(el, 'href', {
+								get: function() {
+									return hrefValue || rawGetAttribute.call(this, 'href') || '';
+								},
+								set: function(value) {
+									if (typeof value === 'string') {
+										hrefValue = z_proxyCdnUrl(value);
+										rawSetAttribute.call(this, 'href', hrefValue);
+									} else {
+										hrefValue = value;
+									}
+								},
+								configurable: true,
+								enumerable: true
+							});
+						}
+
+						return el;
+					};
+
+					const Z_OriginalXMLHttpRequest = window.XMLHttpRequest;
+					window.XMLHttpRequest = function (...args) {
+						const xhr = new Z_OriginalXMLHttpRequest(...args);
+						const rawOpen = xhr.open;
+
+						xhr.open = function (method, url, ...rest) {
+							if (typeof url === 'string') {
+								const methodUpper = (method || '').toUpperCase();
+								if (methodUpper === 'GET' && z_isUrlInWhitelist(url)) {
+									url = z_proxyCdnUrl(url);
+								}
+							}
+							return rawOpen.call(this, method, url, ...rest);
+						};
+
+						return xhr;
+					};
+
+					window.XMLHttpRequest.prototype = Z_OriginalXMLHttpRequest.prototype;
+					Object.setPrototypeOf(window.XMLHttpRequest, Z_OriginalXMLHttpRequest);
+
+					const z_originalFetch = window.fetch;
+					window.fetch = async function (...args) {
+						if (args.length > 0) {
+							let url = '';
+							let method = 'GET';
+							
+							if (typeof args[0] === 'string') {
+								url = args[0];
+								if (args[1] && args[1].method) {
+									method = args[1].method.toUpperCase();
+								}
+								if (method === 'GET' && z_isUrlInWhitelist(url)) {
+									args[0] = z_proxyCdnUrl(url);
+								}
+							} else if (args[0] instanceof Request) {
+								const originalUrl = args[0].url;
+								method = (args[0].method || 'GET').toUpperCase();
+								if (method === 'GET' && z_isUrlInWhitelist(originalUrl)) {
+									const proxiedUrl = z_proxyCdnUrl(originalUrl);
+									if (proxiedUrl !== originalUrl) {
+										args[0] = new Request(proxiedUrl, args[0]);
+									}
+								}
+							}
+						}
+						return z_originalFetch.apply(this, args);
+					};
+				</script>
+			</head>
+			<body>
+				
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>DDTQA v1.0</title>
+<link href="https://artifacts-cdn.chatglm.site/https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&amp;family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://artifacts-cdn.chatglm.site/https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script src="https://artifacts-cdn.chatglm.site/https://cdn.tailwindcss.com"></script>
+<style>
+:root{--bg:#08080d;--sf:#0e0e16;--cd:#14141f;--bd:#1e1e30;--bdl:#2a2a42;--fg:#e4e4f0;--fs:#8888a0;--mt:#55556a;--bl:#00e676;--bld:rgba(0,230,118,.15);--br:#ff1744;--brd:rgba(255,23,68,.15);--ac:#ffab00;--acd:rgba(255,171,0,.12);--in:#26c6da;--ind:rgba(38,198,218,.12)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--fg);overflow:hidden;height:100vh;height:100dvh;-webkit-tap-highlight-color:transparent}
+.mono{font-family:'JetBrains Mono',monospace}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--sf)}::-webkit-scrollbar-thumb{background:var(--bdl);border-radius:2px}
+.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px;flex-shrink:0}
+.sd.on{background:var(--bl);box-shadow:0 0 5px var(--bl)}.sd.off{background:var(--mt)}.sd.warn{background:var(--ac);box-shadow:0 0 5px var(--ac)}
+.tb{padding:6px 12px;font-size:12px;font-weight:500;color:var(--fs);background:0 0;border:1px solid transparent;border-radius:5px;cursor:pointer;transition:.2s;white-space:nowrap}
+.tb:hover{color:var(--fg);background:var(--cd)}.tb.on{color:var(--ac);background:var(--acd);border-color:rgba(255,171,0,.25)}
+.tc{display:none;height:100%}.tc.on{display:flex;flex-direction:column}
+.cd{background:var(--cd);border:1px solid var(--bd);border-radius:7px;padding:12px}
+.sc{border-radius:7px;padding:12px;border:1px solid var(--bd);animation:si .3s ease-out;position:relative;overflow:hidden}
+.sc::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%}
+.sc.bl{background:var(--bld)}.sc.bl::before{background:var(--bl)}.sc.br{background:var(--brd)}.sc.br::before{background:var(--br)}
+@keyframes si{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+@keyframes pl{0%,100%{opacity:1}50%{opacity:.4}}
+.sci{animation:pl 1.5s ease-in-out infinite}
+.toc{position:fixed;top:60px;right:10px;z-index:1000;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:calc(100vw - 20px)}
+.to{padding:12px 14px;border-radius:7px;min-width:260px;animation:ti .35s ease-out;border:1px solid var(--bd);backdrop-filter:blur(10px);pointer-events:auto}
+.to.bt{background:linear-gradient(135deg,rgba(0,230,118,.15),rgba(0,230,118,.05));border-color:rgba(0,230,118,.3)}
+.to.rt{background:linear-gradient(135deg,rgba(255,23,68,.15),rgba(255,23,68,.05));border-color:rgba(255,23,68,.3)}
+.to.it{background:linear-gradient(135deg,rgba(38,198,218,.15),rgba(38,198,218,.05));border-color:rgba(38,198,218,.3)}
+@keyframes ti{from{opacity:0;transform:translateX(40px) scale(.96)}to{opacity:1;transform:translateX(0) scale(1)}}
+@keyframes too{to{opacity:0;transform:translateX(40px) scale(.96)}}
+.stc{background:var(--cd);border:1px solid var(--bd);border-radius:7px;padding:14px;transition:border-color .2s}
+.stc:hover{border-color:var(--bdl)}
+.pb{height:4px;border-radius:2px;background:var(--bd);overflow:hidden}.pf{height:100%;border-radius:2px;transition:width .5s}
+select,input[type=number]{background:var(--sf);border:1px solid var(--bd);color:var(--fg);padding:5px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:11px;outline:none}
+select:focus,input[type=number]:focus{border-color:var(--ac)}select option{background:var(--cd)}
+.tg{width:34px;height:18px;border-radius:9px;background:var(--bd);cursor:pointer;position:relative;transition:.2s;flex-shrink:0}
+.tg.on{background:var(--ac)}.tg::after{content:'';position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.2s}.tg.on::after{transform:translateX(16px)}
+#cc{display:block;width:100%;height:100%}
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:900;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.mo.op{display:flex}.md{background:var(--cd);border:1px solid var(--bd);border-radius:10px;padding:20px;width:90%;max-width:440px;max-height:80vh;overflow-y:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--fs);border-bottom:1px solid var(--bd);font-weight:600}
+td{padding:8px 10px;font-size:11px;border-bottom:1px solid var(--bd);color:var(--fs)}
+.bg{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600}
+.bg-ap{background:rgba(255,171,0,.2);color:#ffab00}.bg-a{background:rgba(0,230,118,.15);color:#00e676}.bg-b{background:rgba(38,198,218,.15);color:#26c6da}
+.vc{position:relative;background:#000;border-radius:7px;overflow:hidden;border:1px solid var(--bd);min-height:100px}
+.vc video{width:100%;display:block;pointer-events:none}
+.so{position:absolute;inset:0;pointer-events:none;border:2px solid transparent;border-radius:7px;z-index:2}
+.so.on{border-color:var(--ac);animation:sp 2s ease-in-out infinite}
+@keyframes sp{0%,100%{box-shadow:inset 0 0 20px rgba(255,171,0,.05)}50%{box-shadow:inset 0 0 40px rgba(255,171,0,.12)}}
+.vp{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.88)}.vp.hid{display:none}
+.cb{padding:7px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;transition:.2s;display:inline-flex;align-items:center;gap:5px}
+.cb:active{transform:scale(.97)}.cbp{background:var(--ac);color:#000}
+.cbd{background:var(--brd);color:var(--br);border:1px solid rgba(255,23,68,.3)}
+.tfs{display:flex;gap:2px;background:var(--sf);border-radius:5px;padding:2px;border:1px solid var(--bd)}
+.tfb{padding:3px 8px;font-size:10px;font-weight:600;border-radius:3px;cursor:pointer;border:none;background:0 0;color:var(--mt);transition:.15s}
+.tfb.on{background:var(--ac);color:#000}.tfb:hover:not(.on){color:var(--fg)}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:10px;font-weight:700;flex-shrink:0}
+.step-line{margin-left:9px;border-left:2px solid var(--bdl);padding-left:16px;padding-bottom:8px}
+.note-box{background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.2);border-radius:6px;padding:10px 12px;margin-top:10px}
+.code-ta{width:100%;height:140px;background:#0a0a12;border:1px solid var(--bdl);border-radius:6px;color:var(--ac);font-family:'JetBrains Mono',monospace;font-size:9px;padding:8px;resize:none;outline:none;line-height:1.4;word-break:break-all}
+.code-ta:focus{border-color:var(--ac)}
+.code-ta::selection{background:rgba(255,171,0,.3)}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.bounce{animation:bounce 2s ease-in-out infinite}
+.warn-box{background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.25);border-radius:8px;padding:14px;margin-bottom:12px}
+@media(max-width:768px){.hide-m{display:none!important}.tab-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}}
+</style>
+
+
+
+<header class="flex items-center justify-between px-3 h-11 border-b" style="border-color:var(--bd);background:var(--sf)">
+  <div class="flex items-center gap-2">
+    <i class="fa-solid fa-chart-line text-xs" style="color:var(--ac)"></i>
+    <span class="font-semibold text-xs tracking-wide">DDTQA</span>
+    <span class="text-xs" style="color:var(--mt)">v1.0</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="sd on" id="edot"></span>
+    <span class="text-xs mono" id="clk" style="color:var(--fs)">13:20:03</span>
+    <button onclick="toggleSettings()" style="color:var(--fs);background:var(--cd);border:1px solid var(--bd);cursor:pointer;padding:4px 7px;border-radius:4px"><i class="fa-solid fa-gear" style="font-size:11px"></i></button>
+  </div>
+</header>
+
+<nav class="flex items-center gap-1 px-2 h-9 border-b tab-scroll" style="border-color:var(--bd);background:var(--bg)">
+  <button class="tb" data-t="chart" onclick="swTab('chart')"><i class="fa-solid fa-chart-column mr-1" style="font-size:10px"></i>Chart</button>
+  <button class="tb" data-t="signals" onclick="swTab('signals')">Signals <span class="ml-0.5 mono" id="scb" style="color:var(--ac);font-size:10px">0</span></button>
+  <button class="tb" data-t="analytics" onclick="swTab('analytics')">Analytics</button>
+  <button class="tb on" data-t="capture" onclick="swTab('capture')">Get File</button>
+  <div class="flex-1"></div>
+  <select id="psel" onchange="chPair(this.value)" style="font-size:10px;padding:3px 6px">
+    <option>EURUSD OTC</option><option>GBPUSD OTC</option><option>USDJPY OTC</option>
+    <option>AUDUSD OTC</option><option>EURGBP OTC</option><option>USDCAD OTC</option>
+    <option>USDCHF OTC</option><option>NZDUSD OTC</option><option>EURJPY OTC</option>
+    <option>GBPJPY OTC</option><option>AUDJPY OTC</option><option>EURAUD OTC</option>
+    <option>GBPAUD OTC</option><option>EURCAD OTC</option><option>GBPCHF OTC</option>
+  </select>
+</nav>
+
+<main style="height:calc(100vh - 76px);height:calc(100dvh - 76px);overflow:hidden">
+
+<section class="tc" id="t-chart">
+  <div class="flex h-full">
+    <div class="flex-1 flex flex-col p-1.5 min-w-0">
+      <div class="flex items-center gap-2 mb-1 px-1">
+        <span class="text-xs font-semibold" id="cpair" style="color:var(--fg)">EURJPY OTC</span>
+        <div class="tfs" id="tf-sel"><button class="tfb" onclick="setTF(0)">5s</button><button class="tfb" onclick="setTF(1)">10s</button><button class="tfb on" onclick="setTF(2)">15s</button><button class="tfb" onclick="setTF(3)">30s</button><button class="tfb" onclick="setTF(4)">1m</button><button class="tfb" onclick="setTF(5)">2m</button></div>
+        <div class="flex-1"></div>
+        <span class="text-xs mono" style="color:var(--mt)">Candles: <span id="ccnt" style="color:var(--fg)">76</span></span>
+      </div>
+      <div class="flex-1 relative rounded-lg overflow-hidden" style="background:var(--sf);border:1px solid var(--bd)">
+        <canvas id="cc" width="1587" height="193" style="width: 747px; height: 112px;"></canvas>
+        <div class="absolute top-2 right-2"><span class="sci text-xs" style="color:var(--ac)"><i class="fa-solid fa-satellite-dish mr-1"></i>SCANNING</span></div>
+        <div id="ctt" class="absolute hidden mono text-xs p-2 rounded" style="background:rgba(14,14,22,.95);border:1px solid var(--bdl);pointer-events:none;z-index:10;min-width:130px"></div>
+      </div>
+    </div>
+    <div class="w-60 border-l flex flex-col overflow-y-auto hide-m" style="border-color:var(--bd);background:var(--sf)">
+      <div class="p-2.5 border-b" style="border-color:var(--bd)"><div class="text-xs font-semibold mb-1.5" style="color:var(--fs)"><i class="fa-solid fa-crosshairs mr-1" style="color:var(--ac)"></i>ACTIVE SIGNAL</div><div id="asig" class="text-xs" style="color:var(--mt)"><span style="color:var(--mt)">No active signal</span></div></div>
+      <div class="p-2.5 border-b" style="border-color:var(--bd)"><div class="text-xs font-semibold mb-2" style="color:var(--fs)"><i class="fa-solid fa-microchip mr-1" style="color:var(--in)"></i>DETECTION</div><div class="space-y-1.5" id="dst"><div class="flex items-start gap-1.5"><span class="sd warn" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-wave-square mr-0.5" style="font-size:8px;color:var(--mt)"></i>Divergence</div><div class="mono truncate" style="color:var(--ac);font-size:9px">Scanning...</div></div></div><div class="flex items-start gap-1.5"><span class="sd off" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-check-double mr-0.5" style="font-size:8px;color:var(--mt)"></i>CISD</div><div class="mono truncate" style="color:var(--mt);font-size:9px">Awaiting CISD</div></div></div><div class="flex items-start gap-1.5"><span class="sd off" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-bolt mr-0.5" style="font-size:8px;color:var(--mt)"></i>Momentum</div><div class="mono truncate" style="color:var(--mt);font-size:9px">Grade C (35% body)</div></div></div><div class="flex items-start gap-1.5"><span class="sd on" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-layer-group mr-0.5" style="font-size:8px;color:var(--mt)"></i>Structure</div><div class="mono truncate" style="color:var(--bl);font-size:9px">Weak Up</div></div></div><div class="flex items-start gap-1.5"><span class="sd on" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-arrow-trend-up mr-0.5" style="font-size:8px;color:var(--mt)"></i>Trend</div><div class="mono truncate" style="color:var(--bl);font-size:9px">Bull</div></div></div><div class="flex items-start gap-1.5"><span class="sd on" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid fa-clone mr-0.5" style="font-size:8px;color:var(--mt)"></i>Multi-Frame</div><div class="mono truncate" style="color:var(--bl);font-size:9px">Frame 3/3</div></div></div></div></div>
+      <div class="p-2.5 flex-1"><div class="text-xs font-semibold mb-2" style="color:var(--fs)"><i class="fa-solid fa-clock-rotate-left mr-1"></i>RECENT</div><div class="space-y-1.5" id="rsig"><div class="text-xs" style="color:var(--mt)">Waiting...</div></div></div>
+      <div class="p-2.5 border-t" style="border-color:var(--bd)"><div class="text-xs font-semibold mb-1" style="color:var(--fs)"><i class="fa-solid fa-shield-halved mr-1" style="color:var(--ac)"></i>TRADES</div><div class="flex items-center justify-between text-xs mb-1"><span style="color:var(--fs)">Used</span><span class="mono" id="tu" style="color:var(--fg)">0/5</span></div><div class="pb"><div class="pf" id="tbar" style="width:0%;background:var(--ac)"></div></div><div id="texh" class="hidden mt-1.5 text-xs text-center py-1 rounded" style="background:var(--brd);color:var(--br)">LIMIT REACHED</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="tc" id="t-signals">
+  <div class="flex-1 overflow-auto p-3">
+    <div class="cd mb-3 flex items-center justify-between flex-wrap gap-2">
+      <div class="text-xs font-semibold">Signal History</div>
+      <div class="flex gap-2">
+        <button onclick="expCSV()" class="text-xs px-2.5 py-1 rounded" style="background:var(--sf);border:1px solid var(--bd);color:var(--fs);cursor:pointer"><i class="fa-solid fa-download mr-1"></i>CSV</button>
+        <button onclick="clrSig()" class="text-xs px-2.5 py-1 rounded" style="background:var(--brd);border:1px solid rgba(255,23,68,.2);color:var(--br);cursor:pointer"><i class="fa-solid fa-trash mr-1"></i>Clear</button>
+      </div>
+    </div>
+    <div class="cd overflow-x-auto"><table><thead><tr><th>Time</th><th>Pair</th><th>Dir</th><th>Grade</th><th>Score</th><th>Conf</th><th>Structure</th><th>Div Str</th><th>Result</th></tr></thead><tbody id="stb"><tr><td colspan="9" class="text-center" style="color:var(--mt)">No signals yet</td></tr></tbody></table></div>
+  </div>
+</section>
+
+<section class="tc" id="t-analytics">
+  <div class="flex-1 overflow-auto p-3">
+    <div class="grid grid-cols-2 gap-2 mb-3" id="sg"><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Signals</div><div class="text-xl font-bold mono">0</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Win Rate</div><div class="text-xl font-bold mono" style="color:var(--mt)">0.0%</div><div class="mono" style="color:var(--mt);font-size:9px">0W/0L</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Profit Factor</div><div class="text-xl font-bold mono" style="color:var(--mt)">0.00</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Expectancy</div><div class="text-xl font-bold mono" style="color:var(--mt)">0.000</div></div></div>
+    <div class="grid grid-cols-1 gap-2" id="ag"><div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid fa-star mr-1" style="color:var(--ac)"></i>By Grade</div><div class="text-xs" style="color:var(--mt)">No data</div></div><div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid fa-layer-group mr-1" style="color:var(--ac)"></i>By Structure</div><div class="text-xs" style="color:var(--mt)">No data</div></div><div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid fa-arrows-left-right mr-1" style="color:var(--ac)"></i>By Direction</div><div class="text-xs" style="color:var(--mt)">No data</div></div><div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid fa-wave-square mr-1" style="color:var(--ac)"></i>By Div. Strength</div><div class="text-xs" style="color:var(--mt)">No data</div></div></div>
+  </div>
+</section>
+
+<!-- GET FILE TAB -->
+<section class="tc on" id="t-capture">
+  <div class="flex-1 overflow-auto p-3">
+
+    <div class="warn-box">
+      <div class="flex items-start gap-3">
+        <i class="fa-solid fa-triangle-exclamation text-lg mt-0.5 bounce" style="color:var(--ac)"></i>
+        <div class="flex-1">
+          <div class="text-sm font-bold mb-1" style="color:var(--ac)">Why downloads don't work from here</div>
+          <div class="text-xs" style="color:var(--fs)">Android blocks ALL downloads, shares, and clipboard access from <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--br)">file://</code> pages. This is a browser security rule — not a bug. The code below is the only reliable way.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- THE METHOD THAT WORKS -->
+    <div class="cd mb-3" style="border-color:rgba(0,230,118,.3);background:linear-gradient(135deg,rgba(0,230,118,.06),rgba(0,230,118,.02))">
+      <div class="text-sm font-bold mb-2" style="color:var(--bl)"><i class="fa-solid fa-1 mr-1" style="background:var(--bl);color:#000;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px"></i> Copy This Code</div>
+      <div class="text-xs mb-3" style="color:var(--fs)"><strong>Long-press</strong> the box below → tap <strong>"Select All"</strong> → tap <strong>"Copy"</strong>. Then paste into any text editor and save as <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ac)">index.html</code></div>
+      <textarea class="code-ta" id="code-area" readonly=""></textarea>
+      <button class="cb cbp mt-2" style="width:100%;justify-content:center" onclick="tryAutoCopy()"><i class="fa-regular fa-copy"></i> Try Auto-Copy (may fail on file://)</button>
+      <div id="copy-result" class="hidden mt-2 text-center text-xs"></div>
+    </div>
+
+    <!-- WHERE TO PASTE -->
+    <div class="cd mb-3">
+      <div class="text-xs font-bold mb-2" style="color:var(--fg)"><i class="fa-solid fa-paste mr-1" style="color:var(--ac)"></i>Where to paste it</div>
+      <div class="space-y-2">
+        <div class="flex items-start gap-2"><span class="step-num" style="background:var(--bl);color:#000">1</span><div class="text-xs pt-0.5" style="color:var(--fs)">Install <strong>QuickEdit</strong> or any text editor from Play Store</div></div>
+        <div class="step-line"><div class="flex items-start gap-2"><span class="step-num" style="background:var(--bl);color:#000">2</span><div class="text-xs pt-0.5" style="color:var(--fs)">Create new file, name it <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ac)">index.html</code></div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2"><span class="step-num" style="background:var(--bl);color:#000">3</span><div class="text-xs pt-0.5" style="color:var(--fs)">Long-press → <strong>Paste</strong> all the code</div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2"><span class="step-num" style="background:var(--bl);color:#000">4</span><div class="text-xs pt-0.5" style="color:var(--fg)">Save the file. Now you have <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ac)">index.html</code> ready to upload.</div></div></div>
+      </div>
+    </div>
+
+    <!-- GITHUB GUIDE -->
+    <div class="cd mb-3">
+      <div class="flex items-center justify-between cursor-pointer" onclick="toggleGuide()">
+        <div class="text-xs font-bold" style="color:var(--ac)"><i class="fa-brands fa-github mr-1"></i>GitHub Pages Setup (8 steps)</div>
+        <i class="fa-solid fa-chevron-down text-xs" id="guide-arrow" style="color:var(--mt);transition:transform .2s"></i>
+      </div>
+      <div id="guide-panel" class="hidden mt-3">
+        <div class="flex items-start gap-2 pb-2"><span class="step-num" style="background:var(--ac);color:#000">1</span><div class="text-xs pt-0.5" style="color:var(--fs)">Open <a href="https://github.com/signup" target="_blank" style="color:var(--ac);text-decoration:underline;font-weight:600">github.com/signup</a> → create free account</div></div>
+        <div class="step-line"><div class="flex items-start gap-2 pb-2"><span class="step-num" style="background:var(--ac);color:#000">2</span><div class="text-xs pt-0.5" style="color:var(--fs)">Tap <strong>+</strong> → <strong>New repository</strong> → name: <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ac)">ddtqa</code> → check <strong>Add a README</strong> → <strong>Create</strong></div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2 pb-2"><span class="step-num" style="background:var(--in);color:#000">3</span><div class="text-xs pt-0.5" style="color:var(--fs)">Tap <strong>Add file</strong> → <strong>Upload files</strong> → choose <code style="background:var(--bd);padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ac)">index.html</code> → <strong>Commit changes</strong></div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2 pb-2"><span class="step-num" style="background:var(--fs);color:#000">4</span><div class="text-xs pt-0.5" style="color:var(--fs)">Go to <strong>Settings</strong> → scroll to <strong>Pages</strong> → tap it</div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2 pb-2"><span class="step-num" style="background:var(--fs);color:#000">5</span><div class="text-xs pt-0.5" style="color:var(--fs)">Source: <strong>Deploy from a branch</strong> → Branch: <strong>main</strong> → Folder: <strong>/ (root)</strong> → <strong>Save</strong></div></div></div>
+        <div class="step-line"><div class="flex items-start gap-2"><span class="step-num" style="background:var(--bl);color:#000">6</span><div class="text-xs pt-0.5" style="color:var(--fg)">Wait 1-2 min → open:<br><code style="background:var(--bld);padding:3px 6px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--bl);display:inline-block;margin-top:4px">https://YOURNAME.github.io/ddtqa/</code><br><br><strong>Bookmark it!</strong> Camera works from this URL forever.</div></div></div>
+        <div class="note-box"><div class="text-xs" style="color:var(--bl)"><i class="fa-solid fa-check-circle mr-1"></i>After this one-time setup, you never need to copy code again. The app has a permanent HTTPS URL.</div></div>
+      </div>
+    </div>
+
+    <!-- Camera (HTTPS only) -->
+    <div class="cd mb-3">
+      <div class="text-xs font-semibold mb-2"><i class="fa-solid fa-video mr-1.5" style="color:var(--in)"></i>Camera <span class="font-normal" style="color:var(--mt)">(Works after GitHub setup)</span></div>
+      <div class="vc mb-2"><video id="cam-v" autoplay="" playsinline="" muted=""></video><div class="so" id="cam-so"></div>
+        <div class="vp" id="cam-ph"><div style="padding:12px;text-align:center"><i class="fa-solid fa-lock text-lg mb-2" style="color:var(--mt)"></i><div class="text-xs" style="color:var(--mt)">Complete GitHub setup above first</div><button id="cam-btn" class="cb cbp mt-2" onclick="startCam()" style="font-size:10px;padding:5px 10px"><i class="fa-solid fa-video"></i> Try Camera</button><div id="cam-err" class="hidden mt-2 text-xs p-2 rounded text-left" style="background:var(--brd);color:var(--br)"></div></div></div>
+      </div>
+      <div id="cam-ctrl" class="hidden"><button class="cb cbd" onclick="stopCam()"><i class="fa-solid fa-stop"></i> Stop</button></div>
+    </div>
+    <div class="cd">
+      <div class="text-xs font-semibold mb-2"><i class="fa-solid fa-image mr-1.5" style="color:var(--bl)"></i>Screenshot Upload <span class="font-normal" style="color:var(--in)">(Works now)</span></div>
+      <div id="uz" class="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer" style="border-color:var(--bd);color:var(--mt)" onclick="document.getElementById('fi').click()"><i class="fa-solid fa-cloud-arrow-up text-lg mb-1"></i><div class="text-xs">Tap to upload screenshot</div><input type="file" id="fi" class="hidden" accept="image/*" onchange="hFU(this.files)"></div>
+      <div id="uprev" class="hidden mt-2 rounded overflow-hidden border" style="border-color:var(--bd)"><img id="pimg" class="w-full" alt="Preview"></div>
+      <div id="uinfo" class="hidden mt-1 text-xs" style="color:var(--fs)"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div class="mo" id="smod" onclick="if(event.target===this)toggleSettings()">
+<div class="md">
+  <div class="flex items-center justify-between mb-4"><span class="font-semibold text-sm">Settings</span><button onclick="toggleSettings()" style="color:var(--fs);background:0 0;border:0;cursor:pointer;font-size:15px"><i class="fa-solid fa-xmark"></i></button></div>
+  <div class="space-y-3">
+    <div class="flex items-center justify-between"><div><div class="text-sm">Sound Alerts</div></div><div class="tg on" onclick="this.classList.toggle('on');S.snd=this.classList.contains('on')"></div></div>
+    <div class="flex items-center justify-between"><div><div class="text-sm">Max Trades</div></div><select id="mt-sel" onchange="S.mxt=+this.value;S.dis=false;$('texh').classList.add('hid');$('edot').className='sd on';updTM()"><option value="5" selected="">5</option><option value="10">10</option><option value="20">20</option><option value="0">Unlimited</option></select></div>
+    <div class="flex items-center justify-between"><div><div class="text-sm">Signal Threshold</div></div><select id="th-sel" onchange="S.thr=+this.value"><option value="80">80+</option><option value="90" selected="">90+</option><option value="95">95+</option></select></div>
+    <div class="flex items-center justify-between"><div><div class="text-sm">Sim Speed</div></div><select id="ss-sel" onchange="S.ss=+this.value;if(S.stm){clearInterval(S.stm);startSim()}"><option value="0.5">0.5x</option><option value="1" selected="">1x</option><option value="2">2x</option><option value="5">5x</option></select></div>
+    <div class="flex items-center justify-between"><div><div class="text-sm">MACD F/S/Sig</div></div><div class="flex gap-1"><input type="number" id="mf" value="12" min="2" max="50" class="w-10 text-center"><input type="number" id="ms" value="26" min="5" max="100" class="w-10 text-center"><input type="number" id="msig" value="9" min="2" max="50" class="w-10 text-center"></div></div>
+    <div class="flex items-center justify-between"><div><div class="text-sm">Swing Lookback</div></div><select id="sl-sel"><option value="2" selected="">2</option><option value="3">3</option><option value="4">4</option></select></div>
+    <div class="pt-2 border-t" style="border-color:var(--bd)"><button onclick="resetAll()" class="w-full text-xs py-1.5 rounded" style="background:var(--brd);color:var(--br);border:1px solid rgba(255,23,68,.2);cursor:pointer"><i class="fa-solid fa-rotate-left mr-1"></i>Reset All</button></div>
+  </div>
+</div>
+</div>
+
+<div class="toc" id="toc"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const PB={EURUSD:1.085,GBPUSD:1.265,USDJPY:149.5,AUDUSD:.652,EURGBP:.8575,USDCAD:1.365,USDCHF:.885,NZDUSD:.615,EURJPY:162.2,GBPJPY:189.1,AUDJPY:97.4,EURAUD:1.665,GBPAUD:1.938,EURCAD:1.482,GBPCHF:1.12};
+const TFS=[{l:'5s',ms:5000},{l:'10s',ms:10000},{l:'15s',ms:15000},{l:'30s',ms:30000},{l:'1m',ms:60000},{l:'2m',ms:120000}];
+const S={mode:'sim',cands:[],macd:{l:[],s:[],h:[]},pSw:[],mSw:[],penD:[],conD:[],sigs:[],rSig:[],aSig:null,ms:{type:'Init',bull:null},mxt:5,tu:0,dis:false,snd:true,thr:90,ss:1,stm:null,bp:1.085,mom:0,mt:1.085,pair:'EURUSD OTC',hc:null,camS:null,scrS:null,camIng:false,scrIng:false,tf:2,comps:{div:{s:'i',d:''},cisd:{s:'i',d:''},mom:{s:'i',d:''},str:{s:'i',d:''},trd:{s:'i',d:''},mf:{s:'i',d:''}},tr:[],fc:0};
+
+// ===== FILL CODE TEXTAREA =====
+function fillCodeArea(){
+  const ta=$('code-area');
+  ta.value='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+}
+
+// ===== AUTO COPY ATTEMPT =====
+function tryAutoCopy(){
+  const ta=$('code-area');
+  ta.select();ta.setSelectionRange(0,99999999);
+  let ok=false;
+  try{ok=document.execCommand('copy')}catch(e){}
+  if(ok){
+    $('copy-result').innerHTML='<span style="color:var(--bl)"><i class="fa-solid fa-check-circle mr-1"></i>Copied! Now paste into a text editor and save as index.html</span>';
+    iToast('Code copied!');
+  }else{
+    $('copy-result').innerHTML='<span style="color:var(--ac)"><i class="fa-solid fa-hand-pointer mr-1"></i>Auto-copy blocked. Use the manual method: long-press the box → Select All → Copy</span>';
+  }
+  $('copy-result').classList.remove('hidden');
+}
+
+function toggleGuide(){const p=$('guide-panel'),a=$('guide-arrow');if(p.classList.contains('hidden')){p.classList.remove('hidden');p.style.animation='si .3s ease-out';a.style.transform='rotate(180deg)'}else{p.classList.add('hidden');a.style.transform='rotate(0deg)'}}
+function detectOrigin(){const o=location.protocol,h=location.hostname,isSecure=o==='https:'||(o==='http:'&&/localhost|127\.0\.0\.1|::1/i.test(h));if(isSecure){document.querySelectorAll('.warn-box').forEach(e=>e.style.display='none')}}
+
+function initTF(){const c=$('tf-sel');c.innerHTML=TFS.map((t,i)=>`<button class="tfb${i===S.tf?' on':''}" onclick="setTF(${i})">${t.l}</button>`).join('')}
+function setTF(i){S.tf=i;document.querySelectorAll('.tfb').forEach((b,j)=>b.classList.toggle('on',j===i));if(S.stm){clearInterval(S.stm);startSim()}}
+
+async function startCam(){if(S.camIng||S.camS)return;S.camIng=true;const btn=$('cam-btn'),err=$('cam-err');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';err.classList.add('hidden');const o=location.protocol,h=location.hostname,isSecure=o==='https:'||(o==='http:'&&/localhost|127\.0\.0\.1|::1/i.test(h));if(!isSecure){err.innerHTML='<i class="fa-solid fa-lock mr-1"></i>Requires HTTPS. Complete GitHub setup first.';err.classList.remove('hidden');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-video"></i> Try Camera';S.camIng=false;return}if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){err.innerHTML='Not supported.';err.classList.remove('hidden');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-video"></i> Try Camera';S.camIng=false;return}try{const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false});S.camS=stream;const v=$('cam-v');v.srcObject=stream;await new Promise(r=>{v.onloadedmetadata=()=>{v.play().then(r).catch(r)};setTimeout(r,2000)});$('cam-ph').classList.add('hid');$('cam-ctrl').classList.remove('hidden');$('cam-so').classList.add('on');iToast('Camera connected')}catch(e){let msg=e.name==='NotAllowedError'?'Permission denied.':'Error: '+(e.message||e.name);err.innerHTML='<i class="fa-solid fa-triangle-exclamation mr-1"></i>'+msg;err.classList.remove('hidden');eToast(msg)}finally{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-video"></i> Try Camera';S.camIng=false}}
+function stopCam(){if(S.camS){S.camS.getTracks().forEach(t=>{t.stop();t.enabled=false});S.camS=null}$('cam-v').srcObject=null;$('cam-ph').classList.remove('hid');$('cam-ctrl').classList.add('hid');$('cam-so').classList.remove('on');$('cam-err').classList.add('hidden');$('cam-btn').disabled=false;$('cam-btn').innerHTML='<i class="fa-solid fa-video"></i> Try Camera';S.camIng=false}
+function hFU(f){if(!f||!f[0])return;const r=new FileReader();r.onload=e=>{$('pimg').src=e.target.result;$('uprev').classList.remove('hid');$('uinfo').classList.remove('hid');$('uinfo').innerHTML=`<div>${f[0].name}</div><div style="color:var(--mt)">${(f[0].size/1024).toFixed(1)}KB</div><div style="color:var(--ac);margin-top:3px"><i class="fa-solid fa-check-circle mr-1"></i>Captured</div>`;iToast('Screenshot uploaded')};r.readAsDataURL(f[0])}
+
+function genInit(n){const c=[];let p=S.bp;S.mom=0;S.mt=p;for(let i=0;i<n;i++){const x=genOne(p);c.push(x);p=x.c}return c}
+function genOne(pc){const jp=S.pair.includes('JPY'),v=jp?.05:.0003,pl=(S.mt-pc)*.008;S.mom+=(Math.random()-.5)*v*.6;S.mom*=.94;if(Math.random()<.015)S.mt+=(Math.random()-.5)*v*15;const ch=S.mom+pl+(Math.random()-.5)*v*.8,o=pc,c=o+ch;return{o,h:Math.max(o,c)+Math.random()*v*.5,l:Math.min(o,c)-Math.random()*v*.5,c,t:new Date(),i:S.cands.length}}
+function calcEMA(d,p){if(d.length<p)return d.slice();const k=2/(p+1),e=[d[0]];for(let i=1;i<d.length;i++)e.push(d[i]*k+e[i-1]*(1-k));return e}
+function calcMACD(cl){const f=+$('mf').value||12,sl=+$('ms').value||26,sg=+$('msig').value||9;if(cl.length<sl)return{l:[],s:[],h:[]};const ef=calcEMA(cl,f),es=calcEMA(cl,sl),ml=ef.map((v,i)=>v-es[i]),msl=calcEMA(ml,sg);return{l:ml,s:msl,h:ml.map((v,i)=>(v-msl[i])*(S.pair.includes('JPY')?1e4:1e5))}}
+function detSw(cands,lb){const sw=[];if(cands.length<lb*2+1)return sw;for(let i=lb;i<cands.length-lb;i++){let il=true,ih=true;for(let j=1;j<=lb;j++){if(cands[i].l>=cands[i-j].l||cands[i].l>=cands[i+j].l)il=false;if(cands[i].h<=cands[i-j].h||cands[i].h<=cands[i+j].h)ih=false}if(il)sw.push({i,t:'l',v:cands[i].l});if(ih)sw.push({i,t:'h',v:cands[i].h})}return sw}
+function detMSw(hist,lb){const sw=[];if(hist.length<lb*2+1)return sw;for(let i=lb;i<hist.length-lb;i++){let il=true,ih=true;for(let j=1;j<=lb;j++){if(hist[i]>=hist[i-j]||hist[i]>=hist[i+j])il=false;if(hist[i]<=hist[i-j]||hist[i]<=hist[i+j])ih=false}if(il)sw.push({i,t:'l',v:hist[i]});if(ih)sw.push({i,t:'h',v:hist[i]})}return sw}
+function detDiv(ps,ms){const dv=[];const pL=ps.filter(s=>s.t==='l').slice(-10),mL=ms.filter(s=>s.t==='l').slice(-10);for(let i=1;i<pL.length;i++){const pv=pL[i-1],cu=pL[i],d=cu.i-pv.i;if(d<5||d>30)continue;const pm=fCS(mL,pv.i,3),cm=fCS(mL,cu.i,3);if(!pm||!cm)continue;if(cu.v<pv.v&&cm.v>pm.v)dv.push({ty:'bull',s1:pv,s2:cu,m1:pm,m2:cm,str:cDS(pv,cu,pm,cm),i:cu.i,age:0})}const pH=ps.filter(s=>s.t==='h').slice(-10),mH=ms.filter(s=>s.t==='h').slice(-10);for(let i=1;i<pH.length;i++){const pv=pH[i-1],cu=pH[i],d=cu.i-pv.i;if(d<5||d>30)continue;const pm=fCS(mH,pv.i,3),cm=fCS(mH,cu.i,3);if(!pm||!cm)continue;if(cu.v>pv.v&&cm.v<pm.v)dv.push({ty:'bear',s1:pv,s2:cu,m1:pm,m2:cm,str:cDS(pv,cu,pm,cm),i:cu.i,age:0})}return dv}
+function fCS(sw,ti,md){let b=null,bd=md+1;for(const s of sw){const d=Math.abs(s.i-ti);if(d<bd){bd=d;b=s}}return bd<=md?b:null}
+function cDS(a,b,c,d){const pm=S.pair.includes('JPY')?100:1e4;return clamp(Math.round(Math.abs(b.v-a.v)*pm/5+Math.abs(d.v-c.v)/2+((b.i-a.i)-5)/25+20),0,100)}
+function chkCISD(ca,idx){if(idx<1)return null;const c=ca[idx],p=ca[idx-1];if(c.c>c.o&&p.c<p.o&&c.c>p.h)return'bull';if(c.c<c.o&&p.c>p.o&&c.c<p.l)return'bear';return null}
+function grC(c){const r=c.h-c.l;if(!r)return{g:'C',s:0,bp:0};const bp=Math.abs(c.c-c.o)/r*100;return{g:bp>=90?'A+':bp>=80?'A':bp>=60?'B':'C',s:bp,bp}}
+function anlMS(sw){const hs=sw.filter(s=>s.t==='h'),ls=sw.filter(s=>s.t==='l');let hh=0,hl=0,lh=0,ll=0;for(let i=1;i<hs.length;i++){if(hs[i].v>hs[i-1].v)hh++;else lh++}for(let i=1;i<ls.length;i++){if(ls[i].v>ls[i-1].v)hl++;else ll++}if(hh>lh*1.5&&hl>ll*1.5)return{type:'Strong Up',bull:true};if(hh>lh&&hl>=ll)return{type:'Weak Up',bull:true};if(lh>hh*1.5&&ll>hl*1.5)return{type:'Strong Down',bull:false};if(lh>hh&&ll>=hl)return{type:'Weak Down',bull:false};return{type:'Range',bull:null}}
+function scoreSet(dv,cis,mg,st){const ds=(dv.str/100)*40,cs=cis?25:0,mm={'A+':20,'A':17,'B':12,'C':0},ms=mm[mg.g]||0;let ss=st.type.includes('Strong')?10:st.type==='Range'?8:4,ts=0;if(dv.ty==='bull'&&(st.bull===true||st.bull===null))ts=5;if(dv.ty==='bear'&&(st.bull===false||st.bull===null))ts=5;const tot=Math.round(ds+cs+ms+ss+ts),gr=tot>=95?'A+':tot>=90?'A':tot>=80?'B':'REJ';return{tot,gr,conf:clamp(Math.round(tot/100*85+dv.str/100*15),0,99),bk:{ds:Math.round(ds),cs,ms,ss,ts}}}
+function runDet(){if(S.dis||S.cands.length<30)return;const ca=S.cands,li=ca.length-1,lb=+$('sl-sel').value||2;S.macd=calcMACD(ca.map(c=>c.c));S.pSw=detSw(ca,lb);S.mSw=detMSw(S.macd.h,lb);updPen(detDiv(S.pSw,S.mSw));S.ms=anlMS(S.pSw);const cr=chkCISD(ca,li),mg=grC(ca[li]);uCS('div',S.conD.length?'a':'s',S.conD.length?S.conD.length+' confirmed':'Scanning...');uCS('cisd',cr?'a':'i',cr?cr.toUpperCase()+' confirmed':'Awaiting CISD');uCS('mom',mg.g!=='C'?'a':'i',`Grade ${mg.g} (${mg.bp.toFixed(0)}% body)`);uCS('str','a',S.ms.type);uCS('trd','a',S.ms.bull===null?'Neutral':S.ms.bull?'Bull':'Bear');uCS('mf',S.fc>=3?'a':'s',`Frame ${Math.min(S.fc,3)}/3`);if(S.conD.length&&cr&&mg.g!=='C'&&S.fc>=3){const bd=fBD(cr);if(bd){const sc=scoreSet(bd,cr,mg,S.ms);if(sc.tot>=S.thr&&(sc.gr==='A'||sc.gr==='A+')){const ok=(bd.ty==='bull'&&(S.ms.bull===true||S.ms.bull===null))||(bd.ty==='bear'&&(S.ms.bull===false||S.ms.bull===null));if(ok)genSig(bd,cr,mg,sc)}}}}
+function updPen(nd){S.fc++;for(const n of nd){const ex=S.penD.find(p=>p.ty===n.ty&&Math.abs(p.i-n.i)<=2);if(ex){ex.age++;if(ex.age>=3&&!S.conD.find(c=>c.ty===n.ty&&Math.abs(c.i-n.i)<=5))S.conD.push({...ex,cf:true})}else S.penD.push({...n,age:1})}S.penD=S.penD.filter(p=>S.cands.length-1-p.i<10);S.conD=S.conD.filter(c=>S.cands.length-1-c.i<50)}
+function fBD(cd){const m=S.conD.filter(d=>d.ty===cd).sort((a,b)=>b.i-a.i);return m[0]||null}
+function genSig(dv,cis,mg,sc){if(S.sigs.find(s=>s.di===dv.i&&(Date.now()-s.ts)<30000))return;if(S.mxt>0&&S.tu>=S.mxt){S.dis=true;$('texh').classList.remove('hid');$('edot').className='sd warn';$('estu').textContent='Disabled';return}const sig={id:Date.now(),ts:Date.now(),time:new Date().toLocaleTimeString(),pair:S.pair,dir:dv.ty==='bull'?'BUY':'SELL',dt:dv.ty==='bull'?'Bullish Div':'Bearish Div',gr:sc.gr,sc:sc.tot,conf:sc.conf,str:S.ms.type,ds:dv.str,mg:mg.g,cis,bk:sc.bk,di:dv.i,res:null};S.sigs.unshift(sig);S.rSig=S.sigs.slice(0,5);S.aSig=sig;S.tu++;const b=sig.gr==='A+'?.72:.65,wp=clamp(b+(S.ms.type==='Range'?.05:0)+(sig.ds>70?.03:0),.5,.85);sig.res=Math.random()<wp?'WIN':'LOSS';S.tr.push(sig);updAS();updRS();updTM();updST();updAn();showSigToast(sig);if(S.snd)playSnd(sig.dir)}
+
+let cc,cx;const CP={t:28,r:60,b:24,l:8},MR=.28;
+function initCh(){cc=$('cc');cx=cc.getContext('2d');rsCh();window.addEventListener('resize',rsCh);cc.addEventListener('mousemove',chHov);cc.addEventListener('mouseleave',()=>{S.hc=null;$('ctt').classList.add('hid')})}
+function rsCh(){const p=cc.parentElement,d=window.devicePixelRatio||1;cc.width=p.clientWidth*d;cc.height=p.clientHeight*d;cc.style.width=p.clientWidth+'px';cc.style.height=p.clientHeight+'px';cx.setTransform(d,0,0,d,0,0)}
+function chHov(e){const r=cc.getBoundingClientRect(),mx=e.clientX-r.left,w=r.clientWidth,dw=w-CP.l-CP.r,vc=Math.min(S.cands.length,80),si=Math.max(0,S.cands.length-vc),cw=dw/vc,ci=Math.floor((mx-CP.l)/cw)+si;if(ci>=0&&ci<S.cands.length){S.hc=ci;const c=S.cands[ci],ib=c.c>=c.o,tt=$('ctt');tt.innerHTML=`<div style="color:${ib?'var(--bl)':'var(--br)'};margin-bottom:3px;font-weight:600">${c.t?fT(c.t):'--'}</div><div class="flex justify-between gap-3"><span style="color:var(--mt)">O</span><span>${fP(c.o)}</span></div><div class="flex justify-between gap-3"><span style="color:var(--mt)">H</span><span style="color:var(--bl)">${fP(c.h)}</span></div><div class="flex justify-between gap-3"><span style="color:var(--mt)">L</span><span style="color:var(--br)">${fP(c.l)}</span></div><div class="flex justify-between gap-3"><span style="color:var(--mt)">C</span><span>${fP(c.c)}</span></div>`;tt.classList.remove('hid');tt.style.left=Math.min(mx+12,r.width-150)+'px';tt.style.top=Math.min(e.clientY-r.top-8,r.height-90)+'px'}else{S.hc=null;$('ctt').classList.add('hid')}}
+
+function drawCh(){const w=cc.clientWidth,h=cc.clientHeight,c=cx;c.clearRect(0,0,w,h);if(S.cands.length<5){c.fillStyle='#55556a';c.font='12px Space Grotesk';c.textAlign='center';c.fillText('Generating data...',w/2,h/2);return}const dw=w-CP.l-CP.r,dh=h-CP.t-CP.b,ph=dh*(1-MR),mh=dh*MR,mt=CP.t+ph+6;const vc=Math.min(S.cands.length,80),si=Math.max(0,S.cands.length-vc),vis=S.cands.slice(si,si+vc),cw=dw/vc,bw=Math.max(1,cw*.65);let mn=Infinity,mx=-Infinity;for(const x of vis){mn=Math.min(mn,x.l);mx=Math.max(mx,x.h)}const pr=mx-mn||.0001,pp=pr*.08;mn-=pp;mx+=pp;const p2y=p=>CP.t+(1-(p-mn)/(mx-mn))*ph;const vh=S.macd.h.slice(si,si+vc);let mmn=0,mmx=0;for(const v of vh)if(v!==undefined){mmn=Math.min(mmn,v);mmx=Math.max(mmx,v)}const mr=Math.max(Math.abs(mmn),Math.abs(mmx),.1)*1.3,m2y=v=>mt+mh/2-(v/mr)*(mh/2);c.strokeStyle='rgba(30,30,48,.5)';c.lineWidth=.5;for(let i=0;i<=5;i++){const y=CP.t+(ph/5)*i;c.beginPath();c.moveTo(CP.l,y);c.lineTo(w-CP.r,y);c.stroke();const p=mx-(i/5)*(mx-mn);c.fillStyle='#55556a';c.font='9px JetBrains Mono';c.textAlign='left';c.fillText(fP(p),w-CP.r+5,y+3)}const zy=m2y(0);c.strokeStyle='rgba(85,85,106,.4)';c.setLineDash([3,3]);c.beginPath();c.moveTo(CP.l,zy);c.lineTo(w-CP.r,zy);c.stroke();c.setLineDash([]);c.fillStyle='#55556a';c.font='8px JetBrains Mono';c.textAlign='left';c.fillText('MACD',CP.l+3,mt+10);for(let i=0;i<vis.length;i++){const x=vis[i],px=CP.l+i*cw+cw/2,ib=x.c>=x.o,col=ib?'#00e676':'#ff1744';const oY=p2y(x.o),cY=p2y(x.c),hY=p2y(x.h),lY=p2y(x.l);c.strokeStyle=col;c.lineWidth=1;c.beginPath();c.moveTo(px,hY);c.lineTo(px,lY);c.stroke();const bT=Math.min(oY,cY),bH=Math.max(Math.abs(oY-cY),1);if(ib){c.fillStyle='rgba(0,230,118,.3)';c.fillRect(px-bw/2,bT,bw,bH);c.strokeStyle=col;c.lineWidth=1;c.strokeRect(px-bw/2,bT,bw,bH)}else{c.fillStyle=col;c.fillRect(px-bw/2,bT,bw,bH)}if(S.hc===si+i){c.strokeStyle='rgba(255,255,255,.25)';c.lineWidth=1;c.strokeRect(px-cw/2,CP.t,cw,ph)}if(vh[i]!==undefined){const my=m2y(vh[i]),bh=Math.abs(zy-my);c.fillStyle=vh[i]>=0?'rgba(0,230,118,.45)':'rgba(255,23,68,.45)';c.fillRect(px-bw/2,Math.min(my,zy),bw,Math.max(bh,1))}}if(S.macd.h.length>si){c.strokeStyle='#26c6da';c.lineWidth=1;c.beginPath();let st=false;for(let i=0;i<vc;i++){const idx=si+i;if(idx<S.macd.h.length){const x=CP.l+i*cw+cw/2,y=m2y(S.macd.h[idx]);if(!st){c.moveTo(x,y);st=true}else c.lineTo(x,y)}}c.stroke()}for(const s of S.pSw){if(s.i<si||s.i>=si+vc)continue;const x=CP.l+(s.i-si)*cw+cw/2,y=p2y(s.v);c.beginPath();c.arc(x,y,2.5,0,Math.PI*2);c.fillStyle=s.t==='l'?'#00e676':'#ff1744';c.fill()}for(const d of S.conD){const a=d.s1,b=d.s2;if(a.i<si&&b.i<si)continue;if(a.i>=si+vc&&b.i>=si+vc)continue;const x1=CP.l+(a.i-si)*cw+cw/2,y1=p2y(a.v),x2=CP.l+(b.i-si)*cw+cw/2,y2=p2y(b.v);const col=d.ty==='bull'?'#00e676':'#ff1744';c.strokeStyle=col;c.lineWidth=1.5;c.setLineDash([4,3]);c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();c.setLineDash([]);c.fillStyle=col;c.font='bold 8px Space Grotesk';c.textAlign='center';c.fillText(d.ty==='bull'?'BL DIV':'BR DIV',(x1+x2)/2,Math.min(y1,y2)-7)}const last=S.cands[S.cands.length-1],cy=p2y(last.c),ib=last.c>=last.o;c.strokeStyle=ib?'rgba(0,230,118,.4)':'rgba(255,23,68,.4)';c.lineWidth=.7;c.setLineDash([2,2]);c.beginPath();c.moveTo(CP.l,cy);c.lineTo(w-CP.r,cy);c.stroke();c.setLineDash([]);c.fillStyle=ib?'#00e676':'#ff1744';const pt=fP(last.c);c.font='bold 9px JetBrains Mono';const tw=c.measureText(pt).width;c.fillRect(w-CP.r,cy-7,tw+10,14);c.fillStyle='#000';c.textAlign='left';c.fillText(pt,w-CP.r+5,cy+3);c.fillStyle='#55556a';c.font='8px JetBrains Mono';c.textAlign='center';const ts=Math.max(1,Math.floor(vc/7));for(let i=0;i<vc;i+=ts){const x=CP.l+i*cw+cw/2;if(vis[i].t)c.fillText(vis[i].t.toTimeString().slice(3,8),x,h-5)}c.strokeStyle='rgba(30,30,48,.7)';c.lineWidth=1;c.beginPath();c.moveTo(CP.l,mt-3);c.lineTo(w-CP.r,mt-3);c.stroke()}
+
+function uCS(k,st,d){S.comps[k]={s:st,d:d};const c=$('dst');const lb={div:'Divergence',cisd:'CISD',mom:'Momentum',str:'Structure',trd:'Trend',mf:'Multi-Frame'};const ic={div:'fa-wave-square',cisd:'fa-check-double',mom:'fa-bolt',str:'fa-layer-group',trd:'fa-arrow-trend-up',mf:'fa-clone'};let h='';for(const[ky,v]of Object.entries(S.comps)){const dc=v.s==='a'?'on':v.s==='s'?'warn':'off',vc=v.s==='a'?'var(--bl)':v.s==='s'?'var(--ac)':'var(--mt)';h+=`<div class="flex items-start gap-1.5"><span class="sd ${dc}" style="margin-top:4px"></span><div class="flex-1 min-w-0"><div style="color:var(--fs);font-size:10px"><i class="fa-solid ${ic[ky]} mr-0.5" style="font-size:8px;color:var(--mt)"></i>${lb[ky]}</div><div class="mono truncate" style="color:${vc};font-size:9px">${v.d}</div></div></div>`}c.innerHTML=h}
+function updAS(){const e=$('asig'),s=S.aSig;if(!s){e.innerHTML='<span style="color:var(--mt)">No active signal</span>';return}const ib=s.dir==='BUY';e.innerHTML=`<div class="sc ${ib?'bl':'br'}"><div class="flex items-center justify-between mb-1.5"><span class="text-xs font-bold" style="color:${ib?'var(--bl)':'var(--br)'}">${s.dir}</span><span class="bg ${s.gr==='A+'?'bg-ap':'bg-a'}">${s.gr}</span></div><div class="mono text-xs mb-0.5" style="color:var(--fg)">${s.pair}</div><div style="color:var(--fs);font-size:10px">${s.dt} | CISD</div><div class="flex justify-between mt-1.5"><span style="color:var(--fs);font-size:10px">Score</span><span class="mono text-xs font-bold" style="color:var(--ac)">${s.sc}</span></div><div class="flex justify-between"><span style="color:var(--fs);font-size:10px">Confidence</span><span class="mono" style="color:var(--fg);font-size:10px">${s.conf}%</span></div></div>`}
+function updRS(){const e=$('rsig');if(!S.rSig.length){e.innerHTML='<div class="text-xs" style="color:var(--mt)">Waiting...</div>';return}e.innerHTML=S.rSig.map(s=>{const ib=s.dir==='BUY',rc=s.res==='WIN'?'var(--bl)':s.res==='LOSS'?'var(--br)':'var(--mt)';return`<div class="flex items-center justify-between py-1 border-b" style="border-color:var(--bd)"><div class="flex items-center gap-1.5"><span class="w-1 h-1 rounded-full" style="background:${ib?'var(--bl)':'var(--br)'}"></span><span class="mono" style="color:var(--fs);font-size:10px">${s.time}</span><span class="font-semibold" style="color:${ib?'var(--bl)':'var(--br)'};font-size:10px">${s.dir}</span></div><div class="flex items-center gap-1"><span class="bg ${s.gr==='A+'?'bg-ap':'bg-a'}" style="font-size:8px">${s.gr}</span><span class="mono" style="color:${rc};font-size:9px">${s.res||'...'}</span></div></div>`}).join('')}
+function updTM(){const u=S.tu,m=S.mxt||'∞';$('tu').textContent=`${u}/${m}`;const p=S.mxt>0?(u/S.mxt)*100:0;const b=$('tbar');b.style.width=p+'%';b.style.background=p>80?'var(--br)':'var(--ac)'}
+function updST(){const tb=$('stb');$('scb').textContent=S.sigs.length;if(!S.sigs.length){tb.innerHTML='<tr><td colspan="9" class="text-center" style="color:var(--mt)">No signals yet</td></tr>';return}tb.innerHTML=S.sigs.map(s=>{const dc=s.dir==='BUY'?'var(--bl)':'var(--br)',gc=s.gr==='A+'?'bg-ap':s.gr==='A'?'bg-a':'bg-b',rc=s.res==='WIN'?'var(--bl)':s.res==='LOSS'?'var(--br)':'var(--mt)';return`<tr><td class="mono">${s.time}</td><td style="font-size:10px">${s.pair}</td><td style="color:${dc};font-weight:600">${s.dir}</td><td><span class="bg ${gc}">${s.gr}</span></td><td class="mono" style="color:var(--ac)">${s.sc}</td><td class="mono">${s.conf}%</td><td style="font-size:10px">${s.str}</td><td class="mono">${s.ds}</td><td style="color:${rc};font-weight:600">${s.res||'...'}</td></tr>`}).join('')}
+function updAn(){const r=S.tr,w=r.filter(x=>x.res==='WIN').length,l=r.filter(x=>x.res==='LOSS').length,t=w+l,wr=t?(w/t*100):0;const pf=l?((w*.85)/(l*1)):t?99:0,ex=t?(wr/100*.85-(1-wr/100)*1):0;$('sg').innerHTML=`<div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Signals</div><div class="text-xl font-bold mono">${S.sigs.length}</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Win Rate</div><div class="text-xl font-bold mono" style="color:${wr>=60?'var(--bl)':wr?'var(--br)':'var(--mt)'}">${wr.toFixed(1)}%</div><div class="mono" style="color:var(--mt);font-size:9px">${w}W/${l}L</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Profit Factor</div><div class="text-xl font-bold mono" style="color:${pf>=1.5?'var(--bl)':pf?'var(--ac)':'var(--mt)'}">${pf.toFixed(2)}</div></div><div class="stc"><div class="text-xs mb-0.5" style="color:var(--fs)">Expectancy</div><div class="text-xl font-bold mono" style="color:${ex>0?'var(--bl)':ex<0?'var(--br)':'var(--mt)'}">${ex>0?'+':''}${ex.toFixed(3)}</div></div>`;const bg={},bs={},bd={},bst={};for(const s of r){[{k:s.gr,o:bg},{k:s.str,o:bs},{k:s.dir,o:bd},{k:(s.ds>=71?'Strong':s.ds>=41?'Moderate':'Weak'),o:bst}].forEach(({k,o})=>{if(!o[k])o[k]={w:0,t:0};o[k].t++;if(s.res==='WIN')o[k].w++})};function rb(ti,da,ic){const e=Object.entries(da);if(!e.length)return`<div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid ${ic} mr-1" style="color:var(--ac)"></i>${ti}</div><div class="text-xs" style="color:var(--mt)">No data</div></div>`;return`<div class="stc"><div class="text-xs font-semibold mb-2"><i class="fa-solid ${ic} mr-1" style="color:var(--ac)"></i>${ti}</div><div class="space-y-1.5">${e.map(([k,v])=>{const wr2=v.t?(v.w/v.t*100):0;return`<div><div class="flex justify-between text-xs mb-0.5"><span style="color:var(--fs);font-size:10px">${k}</span><span class="mono" style="color:var(--fg);font-size:10px">${wr2.toFixed(0)}% <span style="color:var(--mt)">(${v.w}/${v.t})</span></span></div><div class="pb"><div class="pf" style="width:${wr2}%;background:${wr2>=65?'var(--bl)':wr2>=50?'var(--ac)':'var(--br)'}"></div></div></div>`}).join('')}</div></div>`}$('ag').innerHTML=rb('By Grade',bg,'fa-star')+rb('By Structure',bs,'fa-layer-group')+rb('By Direction',bd,'fa-arrows-left-right')+rb('By Div. Strength',bst,'fa-wave-square')}
+
+function showSigToast(s){const c=$('toc'),t=document.createElement('div'),ib=s.dir==='BUY';t.className=`to ${ib?'bt':'rt'}`;t.innerHTML=`<div class="flex items-center justify-between mb-1.5"><span class="text-xs font-bold" style="color:${ib?'var(--bl)':'var(--br)'}"><i class="fa-solid ${ib?'fa-arrow-up':'fa-arrow-down'} mr-1"></i>${s.dir}</span><span class="bg ${s.gr==='A+'?'bg-ap':'bg-a'}">${s.gr}</span></div><div class="text-xs font-semibold mb-0.5">${s.pair}</div><div class="text-xs" style="color:var(--fs)">${s.dt} | CISD</div><div class="flex gap-3 mt-1.5 pt-1.5" style="border-top:1px solid rgba(255,255,255,.06)"><span class="text-xs" style="color:var(--mt)">Score <b style="color:var(--ac)">${s.sc}</b></span><span class="text-xs" style="color:var(--mt)">Conf <b>${s.conf}%</b></span></div>`;c.appendChild(t);setTimeout(()=>{t.style.animation='too .3s ease-in forwards';setTimeout(()=>t.remove(),300)},4500)}
+function iToast(m){const c=$('toc'),t=document.createElement('div');t.className='to it';t.innerHTML=`<div class="text-xs" style="color:var(--in)"><i class="fa-solid fa-info-circle mr-1"></i>${m}</div>`;c.appendChild(t);setTimeout(()=>{t.style.animation='too .3s ease-in forwards';setTimeout(()=>t.remove(),300)},3000)}
+function eToast(m){const c=$('toc'),t=document.createElement('div');t.className='to et';t.innerHTML=`<div class="text-xs" style="color:var(--br)"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${m}</div>`;c.appendChild(t);setTimeout(()=>{t.style.animation='too .3s ease-in forwards';setTimeout(()=>t.remove(),300)},4500)}
+function playSnd(d){try{const a=new(window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.type='sine';if(d==='BUY'){o.frequency.setValueAtTime(660,a.currentTime);o.frequency.setValueAtTime(880,a.currentTime+.1);o.frequency.setValueAtTime(1100,a.currentTime+.2)}else{o.frequency.setValueAtTime(880,a.currentTime);o.frequency.setValueAtTime(660,a.currentTime+.1);o.frequency.setValueAtTime(440,a.currentTime+.2)}g.gain.setValueAtTime(.15,a.currentTime);g.gain.exponentialRampToValueAtTime(.01,a.currentTime+.35);o.start(a.currentTime);o.stop(a.currentTime+.35)}catch(e){}}
+
+function swTab(t){document.querySelectorAll('.tb').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('.tc').forEach(e=>e.classList.toggle('on',e.id===`t-${t}`));if(t==='analytics')updAn();if(t==='signals')updST();if(t==='capture')fillCodeArea()}
+function toggleSettings(){$('smod').classList.toggle('op')}
+function resetAll(){S.cands=[];S.sigs=[];S.rSig=[];S.aSig=null;S.tr=[];S.conD=[];S.penD=[];S.tu=0;S.dis=false;S.fc=0;S.mom=0;S.mt=S.bp;$('texh').classList.add('hid');$('edot').className='sd on';updAS();updRS();updTM();updST();updAn();toggleSettings()}
+function expCSV(){if(!S.sigs.length)return;const h='Time,Pair,Dir,Grade,Score,Conf,Structure,DivStr,Result\n',r=S.sigs.map(s=>`${s.time},${s.pair},${s.dir},${s.gr},${s.sc},${s.conf}%,${s.str},${s.ds},${s.res||''}`).join('\n');const b=new Blob([h+r],{type:'text/csv'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='ddtqa_signals.csv';a.click();URL.revokeObjectURL(u)}
+function clrSig(){S.sigs=[];S.rSig=[];S.aSig=null;S.tr=[];S.tu=0;S.dis=false;$('texh').classList.add('hid');$('edot').className='sd on';updAS();updRS();updTM();updST();updAn()}
+
+function startSim(){if(!S.cands.length){S.cands=genInit(60);S.macd=calcMACD(S.cands.map(c=>c.c))}const tfMs=TFS[S.tf].ms,baseInterval=15000;const interval=Math.max(100,Math.round((baseInterval/tfMs)*1000/S.ss));S.stm=setInterval(()=>{if(S.mode!=='sim'&&S.mode!=='screenshot')return;const nc=genOne(S.cands[S.cands.length-1].c);S.cands.push(nc);if(S.cands.length>200)S.cands=S.cands.slice(-200);$('ccnt').textContent=S.cands.length;runDet();drawCh()},interval)}
+function chPair(p){S.pair=p;const k=p.replace(' OTC','');S.bp=PB[k]||1.085;S.mt=S.bp;S.mom=0;S.cands=[];S.conD=[];S.penD=[];S.aSig=null;S.fc=0;$('cpair').textContent=p;updAS()}
+function fP(p){return S.pair.includes('JPY')?p.toFixed(3):p.toFixed(5)}
+function fT(d){return d.toTimeString().slice(0,8)}
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v))}
+function updClk(){$('clk').textContent=fT(new Date())}
+
+function init(){initCh();initTF();detectOrigin();updClk();setInterval(updClk,1000);uCS('div','s','Initializing...');uCS('cisd','i','Awaiting data');uCS('mom','i','Awaiting data');uCS('str','i','Awaiting data');uCS('trd','i','Awaiting data');uCS('mf','s','Frame 0/3');updTM();updAn();startSim()}
+document.addEventListener('DOMContentLoaded',init);
+</script>
+
+
+			
+		
+</body></html>
